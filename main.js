@@ -529,8 +529,8 @@ function stripMarkdownFormatting(rawMarkdown) {
   if (!rawMarkdown) {
     return "";
   }
-  let text = rawMarkdown.replace(/\r\n/g, "\n");
-  text = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
+  let text = rawMarkdown.replace(/\r\n/g, "\n").replace(/^\uFEFF/, "");
+  text = text.replace(/^---[ \t]*\n[\s\S]*?\n---[ \t]*\n?/, "");
   text = text.replace(/```[\w-]*\n?/g, "");
   text = text.replace(/~~~[\w-]*\n?/g, "");
   text = text.replace(/!\[\[([^|\]]+)\|([^\]]+)\]\]/g, "$2");
@@ -630,8 +630,14 @@ function calculatePauseMetadata(word) {
   };
 }
 function processText(rawMarkdown) {
-  const cleaned = stripMarkdownFormatting(rawMarkdown);
-  if (!cleaned) {
+  if (!rawMarkdown || rawMarkdown.trim().length === 0) {
+    return { paragraphs: [], words: [] };
+  }
+  let cleaned = stripMarkdownFormatting(rawMarkdown);
+  if (!cleaned || cleaned.trim().length === 0) {
+    cleaned = rawMarkdown.replace(/[#*`_~=\[\]()>]/g, " ").trim();
+  }
+  if (!cleaned || cleaned.trim().length === 0) {
     return { paragraphs: [], words: [] };
   }
   const rawParagraphs = cleaned.split(/\n{2,}/).map((p) => p.replace(/\n+/g, " ").trim()).filter((p) => p.length > 0);
@@ -693,10 +699,14 @@ var NoteSuggestModal = class extends import_obsidian2.FuzzySuggestModal {
   constructor(app, onChooseFile) {
     super(app);
     this.onChooseFile = onChooseFile;
-    this.setPlaceholder("Search or choose a note from any folder...");
+    this.setPlaceholder("Vyberte alebo vyh\u013Eadajte pozn\xE1mku na r\xFDchle \u010D\xEDtanie...");
   }
   getItems() {
-    return this.app.vault.getMarkdownFiles().sort((a, b) => a.path.localeCompare(b.path));
+    const mdFiles = this.app.vault.getMarkdownFiles();
+    if (mdFiles && mdFiles.length > 0) {
+      return mdFiles.sort((a, b) => a.path.localeCompare(b.path));
+    }
+    return this.app.vault.getFiles().filter((f) => ["md", "markdown", "txt"].includes(f.extension.toLowerCase())).sort((a, b) => a.path.localeCompare(b.path));
   }
   getItemText(file) {
     return file.path;
@@ -735,7 +745,7 @@ var VelocityReaderPlugin = class extends import_obsidian2.Plugin {
         const hasSelection = editor.somethingSelected();
         menu.addItem((item) => {
           item.setTitle(
-            hasSelection ? "Speed Read Selected Text" : "Speed Read from Cursor to End"
+            hasSelection ? "Speed Read Selected Text" : "Speed Read Active Note"
           ).setIcon("gauge").onClick(() => {
             this.launchReaderFromEditor(editor, view);
           });
@@ -754,27 +764,57 @@ var VelocityReaderPlugin = class extends import_obsidian2.Plugin {
   }
   /**
    * Handles clicking the ribbon icon on the left bar.
-   * If an active note is open with content, launches reading for it.
-   * If no note is open, automatically prompts the note picker.
+   * - If an active editor has selected text -> reads selected text.
+   * - If an active note is open and has readable text -> reads it.
+   * - If active note is empty or no note is open -> automatically opens NoteSuggestModal.
    */
-  handleRibbonClick() {
+  async handleRibbonClick() {
     const activeView = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
-    if (activeView && activeView.editor) {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (activeView?.editor?.somethingSelected()) {
       this.launchReaderFromEditor(activeView.editor, activeView);
-    } else {
-      this.promptChooseNoteAndRead();
+      return;
     }
+    if (activeFile) {
+      try {
+        let content = "";
+        if (activeView?.editor) {
+          content = activeView.editor.getValue();
+        }
+        if (!content || content.trim().length === 0) {
+          content = await this.app.vault.cachedRead(activeFile);
+        }
+        if (content && content.trim().length > 0) {
+          const processed = processText(content);
+          if (processed.words.length > 0) {
+            new SpeedReaderModal(this.app, this, processed, activeFile.basename).open();
+            return;
+          }
+        }
+      } catch (e) {
+        console.error("Velocity Reader: Error reading active file", e);
+      }
+    }
+    this.promptChooseNoteAndRead();
   }
   /**
-   * Opens a search modal allowing the user to pick any markdown file from any vault folder.
+   * Opens a search modal allowing the user to pick any note from any vault folder.
    */
   promptChooseNoteAndRead(callback) {
+    const allMarkdownFiles = this.app.vault.getMarkdownFiles();
+    if (!allMarkdownFiles || allMarkdownFiles.length === 0) {
+      new import_obsidian2.Notice("Velocity Reader: Vo va\u0161om trezore sa nena\u0161li \u017Eiadne pozn\xE1mky.");
+      return;
+    }
     new NoteSuggestModal(this.app, async (file) => {
       try {
-        const content = await this.app.vault.read(file);
-        const processed = processText(content);
+        let content = await this.app.vault.cachedRead(file);
+        if (!content || content.trim().length === 0) {
+          content = await this.app.vault.read(file);
+        }
+        const processed = processText(content || "");
         if (processed.words.length === 0) {
-          new import_obsidian2.Notice(`Velocity Reader: No readable text found in "${file.basename}".`);
+          new import_obsidian2.Notice(`Velocity Reader: Pozn\xE1mka "${file.basename}" neobsahuje \u017Eiadny \u010Ditate\u013En\xFD text.`);
           return;
         }
         if (callback) {
@@ -783,33 +823,44 @@ var VelocityReaderPlugin = class extends import_obsidian2.Plugin {
           new SpeedReaderModal(this.app, this, processed, file.basename).open();
         }
       } catch (err) {
-        console.error("Velocity Reader: Error reading file", err);
-        new import_obsidian2.Notice(`Velocity Reader: Could not read file "${file.basename}".`);
+        console.error("Velocity Reader: Chyba pri \u010D\xEDtan\xED s\xFAboru", err);
+        new import_obsidian2.Notice(`Velocity Reader: Nepodarilo sa na\u010D\xEDta\u0165 s\xFAbor "${file.basename}".`);
       }
     }).open();
   }
   /**
-   * Extracts text from editor (selection or cursor to end of document)
+   * Extracts text from editor (selection, cursor to end, or entire note if cursor is at end)
    * and launches the SpeedReaderModal.
    */
   launchReaderFromEditor(editor, view) {
     let textToRead = "";
-    let title = view.file ? view.file.basename : "Selection";
+    let title = view.file ? view.file.basename : "Dokument";
     if (editor.somethingSelected()) {
       textToRead = editor.getSelection();
-      title = `${title} (Selection)`;
+      title = `${title} (V\xFDber)`;
     } else {
       const cursor = editor.getCursor();
       const lastLine = editor.lineCount() - 1;
       const lastLineLength = editor.getLine(lastLine).length;
-      textToRead = editor.getRange(cursor, {
+      const fromCursor = editor.getRange(cursor, {
         line: lastLine,
         ch: lastLineLength
       });
+      if (fromCursor && fromCursor.trim().length > 0) {
+        textToRead = fromCursor;
+      } else {
+        textToRead = editor.getValue();
+      }
+    }
+    if (!textToRead || textToRead.trim().length === 0) {
+      new import_obsidian2.Notice("Velocity Reader: Aktu\xE1lna pozn\xE1mka je pr\xE1zdna. Otv\xE1ram v\xFDber inej pozn\xE1mky...");
+      this.promptChooseNoteAndRead();
+      return;
     }
     const processed = processText(textToRead);
     if (processed.words.length === 0) {
-      new import_obsidian2.Notice("Velocity Reader: No readable text found to read.");
+      new import_obsidian2.Notice("Velocity Reader: V pozn\xE1mke sa nena\u0161iel \u010Ditate\u013En\xFD text. Otv\xE1ram v\xFDber inej pozn\xE1mky...");
+      this.promptChooseNoteAndRead();
       return;
     }
     new SpeedReaderModal(this.app, this, processed, title).open();
