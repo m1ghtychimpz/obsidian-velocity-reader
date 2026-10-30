@@ -13,7 +13,7 @@ interface CachedWordElement {
 
 export class SpeedReaderModal extends Modal {
 	plugin: VelocityReaderPlugin;
-	doc: ProcessedDocument;
+	readingDoc: ProcessedDocument;
 	documentTitle: string;
 
 	// State
@@ -58,10 +58,10 @@ export class SpeedReaderModal extends Modal {
 
 	private boundKeyDownHandler: (evt: KeyboardEvent) => void;
 
-	constructor(app: App, plugin: VelocityReaderPlugin, doc: ProcessedDocument, documentTitle: string = "Selection") {
+	constructor(app: App, plugin: VelocityReaderPlugin, readingDoc: ProcessedDocument, documentTitle: string = "Selection") {
 		super(app);
 		this.plugin = plugin;
-		this.doc = doc;
+		this.readingDoc = readingDoc;
 		this.documentTitle = documentTitle;
 		this.currentWpm = this.plugin.settings.defaultWpm;
 		this.mode = this.plugin.settings.defaultMode;
@@ -101,7 +101,7 @@ export class SpeedReaderModal extends Modal {
 	 */
 	public loadNewDocument(newDoc: ProcessedDocument, title: string = "Document"): void {
 		this.pause();
-		this.doc = newDoc;
+		this.readingDoc = newDoc;
 		this.documentTitle = title;
 		this.currentIndex = 0;
 		this.wordTimeElapsed = 0;
@@ -273,7 +273,7 @@ export class SpeedReaderModal extends Modal {
 		track.addEventListener("click", (evt: MouseEvent) => {
 			const rect = track.getBoundingClientRect();
 			const ratio = Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width));
-			const targetIndex = Math.floor(ratio * (this.doc.words.length - 1));
+			const targetIndex = Math.floor(ratio * (this.readingDoc.words.length - 1));
 			this.seekToWord(targetIndex);
 		});
 
@@ -294,8 +294,8 @@ export class SpeedReaderModal extends Modal {
 	// ==========================================
 
 	private play(): void {
-		if (this.doc.words.length === 0) return;
-		if (this.currentIndex >= this.doc.words.length - 1) {
+		if (this.readingDoc.words.length === 0) return;
+		if (this.currentIndex >= this.readingDoc.words.length - 1) {
 			this.currentIndex = 0;
 		}
 
@@ -335,7 +335,7 @@ export class SpeedReaderModal extends Modal {
 		this.lastFrameTime = now;
 		this.wordTimeElapsed += deltaMs;
 
-		const currentWord = this.doc.words[this.currentIndex];
+		const currentWord = this.readingDoc.words[this.currentIndex];
 		const durationMs = this.calculateWordDurationMs(currentWord);
 
 		if (this.wordTimeElapsed >= durationMs) {
@@ -343,8 +343,8 @@ export class SpeedReaderModal extends Modal {
 				this.wordTimeElapsed -= durationMs;
 				this.currentIndex++;
 
-				if (this.currentIndex >= this.doc.words.length) {
-					this.currentIndex = this.doc.words.length - 1;
+				if (this.currentIndex >= this.readingDoc.words.length) {
+					this.currentIndex = this.readingDoc.words.length - 1;
 					this.pause();
 					this.renderCurrentWord();
 					this.updateProgressUi();
@@ -392,7 +392,7 @@ export class SpeedReaderModal extends Modal {
 	}
 
 	private renderCurrentWord(): void {
-		const currentWord = this.doc.words[this.currentIndex];
+		const currentWord = this.readingDoc.words[this.currentIndex];
 		if (!currentWord) {
 			this.rsvpPrefixEl.setText("");
 			this.rsvpOrpEl.setText("");
@@ -410,7 +410,7 @@ export class SpeedReaderModal extends Modal {
 	}
 
 	private ensureContextChunkLoaded(wordIndex: number): void {
-		const word = this.doc.words[wordIndex];
+		const word = this.readingDoc.words[wordIndex];
 		if (!word) return;
 
 		const targetParaIdx = word.paragraphIndex;
@@ -425,7 +425,7 @@ export class SpeedReaderModal extends Modal {
 
 		const chunkStart = targetParaIdx;
 		const chunkEnd = Math.min(
-			this.doc.paragraphs.length - 1,
+			this.readingDoc.paragraphs.length - 1,
 			chunkStart + this.paragraphsPerPage - 1
 		);
 
@@ -439,7 +439,7 @@ export class SpeedReaderModal extends Modal {
 		this.nextWordElement = null;
 
 		for (let p = chunkStart; p <= chunkEnd; p++) {
-			const paragraph = this.doc.paragraphs[p];
+			const paragraph = this.readingDoc.paragraphs[p];
 			if (!paragraph) continue;
 
 			const pEl = this.contextContentEl.createEl("p", {
@@ -532,7 +532,7 @@ export class SpeedReaderModal extends Modal {
 	}
 
 	public seekToWord(index: number): void {
-		this.currentIndex = Math.max(0, Math.min(this.doc.words.length - 1, index));
+		this.currentIndex = Math.max(0, Math.min(this.readingDoc.words.length - 1, index));
 		this.wordTimeElapsed = 0;
 		this.renderCurrentWord();
 		this.updateProgressUi();
@@ -542,7 +542,7 @@ export class SpeedReaderModal extends Modal {
 		if (count < 0) {
 			let target = this.currentIndex + count;
 			for (let i = this.currentIndex - 1; i >= Math.max(0, this.currentIndex + count); i--) {
-				if (this.doc.words[i]?.isSentenceEnd) {
+				if (this.readingDoc.words[i]?.isSentenceEnd) {
 					target = i + 1;
 					break;
 				}
@@ -550,18 +550,18 @@ export class SpeedReaderModal extends Modal {
 			this.seekToWord(Math.max(0, target));
 		} else {
 			let target = this.currentIndex + count;
-			for (let i = this.currentIndex; i < Math.min(this.doc.words.length, this.currentIndex + count); i++) {
-				if (this.doc.words[i]?.isSentenceEnd) {
+			for (let i = this.currentIndex; i < Math.min(this.readingDoc.words.length, this.currentIndex + count); i++) {
+				if (this.readingDoc.words[i]?.isSentenceEnd) {
 					target = i + 1;
 					break;
 				}
 			}
-			this.seekToWord(Math.min(this.doc.words.length - 1, target));
+			this.seekToWord(Math.min(this.readingDoc.words.length - 1, target));
 		}
 	}
 
 	private updateProgressUi(): void {
-		const total = this.doc.words.length;
+		const total = this.readingDoc.words.length;
 		if (total === 0) return;
 
 		const pct = Math.round(((this.currentIndex + 1) / total) * 100);
@@ -571,7 +571,7 @@ export class SpeedReaderModal extends Modal {
 		let remainingMs = 0;
 		const baseMs = (60 / this.currentWpm) * 1000;
 		for (let i = this.currentIndex; i < total; i++) {
-			const w = this.doc.words[i];
+			const w = this.readingDoc.words[i];
 			remainingMs += this.smartMicroPauses ? baseMs * w.pauseMultiplier : baseMs;
 		}
 
