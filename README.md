@@ -26,9 +26,11 @@
   - Long words (>10 characters): **1.2x** duration.
 
 ### 3. Deep Obsidian Integration
-- **Selection or Cursor:** Select any text to read it. If nothing is selected, reads from the cursor position to the end of the document.
+- **Left Ribbon Icon:** Click the speedometer (`gauge`) icon in the left ribbon to launch the reader immediately from anywhere.
+- **Choose Any Note:** Easily pick and speed read any document from any folder in your vault using fuzzy search (via ribbon icon, command palette, or the `📂 Choose Note` button inside the reader).
+- **Selection or Cursor:** Select any text to read it. If nothing is selected, reads the entire document or from cursor to end.
 - **Markdown Cleaner:** Automatically strips markdown symbols (`**`, `*`, `#`, `>`, `==`, inline backticks, raw URLs) and resolves wikilinks `[[note|alias]]` to clean display text while preserving natural paragraph breaks.
-- Native Obsidian design variables (`--background-primary`, `--interactive-accent`, etc.) for seamless Light and Dark mode adaptation.
+- Native Obsidian design variables (`--background-primary`, `--interactive-accent`, etc.) for seamless Light and Dark mode adaptation on both Desktop and Mobile.
 
 ---
 

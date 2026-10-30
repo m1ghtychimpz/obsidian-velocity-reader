@@ -2,7 +2,7 @@
 	"id": "velocity-reader",
 	"name": "Velocity Reader",
 	"version": "1.0.0",
-	"minAppVersion": "1.5.0",
+	"minAppVersion": "0.15.0",
 	"description": "High-performance speed reading plugin with RSVP Optimal Recognition Point (ORP) alignment and Contextual Flow with saccadic letter bridging (50–3000 WPM).",
 	"author": "Velocity Reader Team",
 	"authorUrl": "https://obsidian.md",
