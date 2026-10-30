@@ -1,0 +1,29 @@
+{
+	"name": "velocity-reader",
+	"version": "1.0.0",
+	"description": "High-performance speed reading plugin for Obsidian (50–3000 WPM) with RSVP ORP and Contextual Flow modes.",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"test": "tsc -noEmit -skipLibCheck"
+	},
+	"keywords": [
+		"obsidian",
+		"plugin",
+		"speed-reading",
+		"rsvp",
+		"orp",
+		"saccadic"
+	],
+	"author": "Velocity Reader Team",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"builtin-modules": "^3.3.0",
+		"esbuild": "^0.20.0",
+		"obsidian": "^1.5.7",
+		"tslib": "^2.6.2",
+		"typescript": "^5.3.3"
+	}
+}
