@@ -38,11 +38,17 @@ export class NoteSuggestModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, onChooseFile: (file: TFile) => void) {
 		super(app);
 		this.onChooseFile = onChooseFile;
-		this.setPlaceholder("Search or choose a note from any folder...");
+		this.setPlaceholder("Vyberte alebo vyhľadajte poznámku na rýchle čítanie...");
 	}
 
 	getItems(): TFile[] {
-		return this.app.vault.getMarkdownFiles().sort((a, b) => a.path.localeCompare(b.path));
+		const mdFiles = this.app.vault.getMarkdownFiles();
+		if (mdFiles && mdFiles.length > 0) {
+			return mdFiles.sort((a, b) => a.path.localeCompare(b.path));
+		}
+		return this.app.vault.getFiles()
+			.filter((f) => ["md", "markdown", "txt"].includes(f.extension.toLowerCase()))
+			.sort((a, b) => a.path.localeCompare(b.path));
 	}
 
 	getItemText(file: TFile): string {
@@ -92,7 +98,7 @@ export default class VelocityReaderPlugin extends Plugin {
 					item.setTitle(
 						hasSelection
 							? "Speed Read Selected Text"
-							: "Speed Read from Cursor to End"
+							: "Speed Read Active Note"
 					)
 						.setIcon("gauge")
 						.onClick(() => {
@@ -120,28 +126,65 @@ export default class VelocityReaderPlugin extends Plugin {
 
 	/**
 	 * Handles clicking the ribbon icon on the left bar.
-	 * If an active note is open with content, launches reading for it.
-	 * If no note is open, automatically prompts the note picker.
+	 * - If an active editor has selected text -> reads selected text.
+	 * - If an active note is open and has readable text -> reads it.
+	 * - If active note is empty or no note is open -> automatically opens NoteSuggestModal.
 	 */
-	handleRibbonClick(): void {
+	async handleRibbonClick(): Promise<void> {
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (activeView && activeView.editor) {
+		const activeFile = this.app.workspace.getActiveFile();
+
+		// 1. If an active editor has selected text, read selection immediately
+		if (activeView?.editor?.somethingSelected()) {
 			this.launchReaderFromEditor(activeView.editor, activeView);
-		} else {
-			this.promptChooseNoteAndRead();
+			return;
 		}
+
+		// 2. If an active file is open, check if it has content
+		if (activeFile) {
+			try {
+				let content = "";
+				if (activeView?.editor) {
+					content = activeView.editor.getValue();
+				}
+				if (!content || content.trim().length === 0) {
+					content = await this.app.vault.cachedRead(activeFile);
+				}
+				if (content && content.trim().length > 0) {
+					const processed = processText(content);
+					if (processed.words.length > 0) {
+						new SpeedReaderModal(this.app, this, processed, activeFile.basename).open();
+						return;
+					}
+				}
+			} catch (e) {
+				console.error("Velocity Reader: Error reading active file", e);
+			}
+		}
+
+		// 3. Otherwise (no note open, or active note is empty), open note picker immediately
+		this.promptChooseNoteAndRead();
 	}
 
 	/**
-	 * Opens a search modal allowing the user to pick any markdown file from any vault folder.
+	 * Opens a search modal allowing the user to pick any note from any vault folder.
 	 */
 	promptChooseNoteAndRead(callback?: (file: TFile, doc: ProcessedDocument) => void): void {
+		const allMarkdownFiles = this.app.vault.getMarkdownFiles();
+		if (!allMarkdownFiles || allMarkdownFiles.length === 0) {
+			new Notice("Velocity Reader: Vo vašom trezore sa nenašli žiadne poznámky.");
+			return;
+		}
+
 		new NoteSuggestModal(this.app, async (file: TFile) => {
 			try {
-				const content = await this.app.vault.read(file);
-				const processed = processText(content);
+				let content = await this.app.vault.cachedRead(file);
+				if (!content || content.trim().length === 0) {
+					content = await this.app.vault.read(file);
+				}
+				const processed = processText(content || "");
 				if (processed.words.length === 0) {
-					new Notice(`Velocity Reader: No readable text found in "${file.basename}".`);
+					new Notice(`Velocity Reader: Poznámka "${file.basename}" neobsahuje žiadny čitateľný text.`);
 					return;
 				}
 
@@ -151,36 +194,50 @@ export default class VelocityReaderPlugin extends Plugin {
 					new SpeedReaderModal(this.app, this, processed, file.basename).open();
 				}
 			} catch (err) {
-				console.error("Velocity Reader: Error reading file", err);
-				new Notice(`Velocity Reader: Could not read file "${file.basename}".`);
+				console.error("Velocity Reader: Chyba pri čítaní súboru", err);
+				new Notice(`Velocity Reader: Nepodarilo sa načítať súbor "${file.basename}".`);
 			}
 		}).open();
 	}
 
 	/**
-	 * Extracts text from editor (selection or cursor to end of document)
+	 * Extracts text from editor (selection, cursor to end, or entire note if cursor is at end)
 	 * and launches the SpeedReaderModal.
 	 */
 	launchReaderFromEditor(editor: Editor, view: MarkdownView): void {
 		let textToRead = "";
-		let title = view.file ? view.file.basename : "Selection";
+		let title = view.file ? view.file.basename : "Dokument";
 
 		if (editor.somethingSelected()) {
 			textToRead = editor.getSelection();
-			title = `${title} (Selection)`;
+			title = `${title} (Výber)`;
 		} else {
 			const cursor = editor.getCursor();
 			const lastLine = editor.lineCount() - 1;
 			const lastLineLength = editor.getLine(lastLine).length;
-			textToRead = editor.getRange(cursor, {
+			const fromCursor = editor.getRange(cursor, {
 				line: lastLine,
 				ch: lastLineLength,
 			});
+
+			if (fromCursor && fromCursor.trim().length > 0) {
+				textToRead = fromCursor;
+			} else {
+				// Cursor was at the end of the note -> read entire document from start!
+				textToRead = editor.getValue();
+			}
+		}
+
+		if (!textToRead || textToRead.trim().length === 0) {
+			new Notice("Velocity Reader: Aktuálna poznámka je prázdna. Otváram výber inej poznámky...");
+			this.promptChooseNoteAndRead();
+			return;
 		}
 
 		const processed = processText(textToRead);
 		if (processed.words.length === 0) {
-			new Notice("Velocity Reader: No readable text found to read.");
+			new Notice("Velocity Reader: V poznámke sa nenašiel čitateľný text. Otváram výber inej poznámky...");
+			this.promptChooseNoteAndRead();
 			return;
 		}
 

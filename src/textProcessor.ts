@@ -62,10 +62,10 @@ export function stripMarkdownFormatting(rawMarkdown: string): string {
 		return "";
 	}
 
-	let text = rawMarkdown.replace(/\r\n/g, "\n");
+	let text = rawMarkdown.replace(/\r\n/g, "\n").replace(/^\uFEFF/, "");
 
 	// 1. Strip YAML frontmatter if present at the very beginning
-	text = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
+	text = text.replace(/^---[ \t]*\n[\s\S]*?\n---[ \t]*\n?/, "");
 
 	// 2. Remove fenced code block delimiters (keep inner text readable)
 	text = text.replace(/```[\w-]*\n?/g, "");
@@ -236,8 +236,16 @@ export function calculatePauseMetadata(word: string): {
  * ready for zero-allocation RSVP and Contextual Flow rendering.
  */
 export function processText(rawMarkdown: string): ProcessedDocument {
-	const cleaned = stripMarkdownFormatting(rawMarkdown);
-	if (!cleaned) {
+	if (!rawMarkdown || rawMarkdown.trim().length === 0) {
+		return { paragraphs: [], words: [] };
+	}
+
+	let cleaned = stripMarkdownFormatting(rawMarkdown);
+	// Safety fallback: if regex cleaner stripped everything but raw text existed, preserve raw words
+	if (!cleaned || cleaned.trim().length === 0) {
+		cleaned = rawMarkdown.replace(/[#*`_~=\[\]()>]/g, " ").trim();
+	}
+	if (!cleaned || cleaned.trim().length === 0) {
 		return { paragraphs: [], words: [] };
 	}
 
