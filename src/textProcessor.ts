@@ -201,8 +201,14 @@ export function calculatePauseMetadata(word: string): {
 	const trimmedTrailingQuotes = word.replace(/['"”’)\]}]+$/, "");
 	const lastChar = trimmedTrailingQuotes.slice(-1);
 
-	const cleanWord = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-	const cleanLength = Array.from(cleanWord || word).length;
+	let cleanLength = 0;
+	try {
+		const cleanWord = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+		cleanLength = Array.from(cleanWord || word).length;
+	} catch (_e) {
+		const fallbackWord = word.replace(/^[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF]+|[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF]+$/g, "");
+		cleanLength = Array.from(fallbackWord || word).length;
+	}
 
 	let pauseMultiplier = 1.0;
 	let isSentenceEnd = false;

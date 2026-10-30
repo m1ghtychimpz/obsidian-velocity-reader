@@ -1,14 +1,16 @@
 import {
 	App,
 	Editor,
+	FuzzySuggestModal,
 	MarkdownView,
 	Notice,
 	Plugin,
 	PluginSettingTab,
 	Setting,
+	TFile,
 } from "obsidian";
 import { SpeedReaderModal, ReadingMode } from "./speedReaderModal";
-import { processText } from "./textProcessor";
+import { processText, ProcessedDocument } from "./textProcessor";
 
 export interface VelocityReaderSettings {
 	defaultWpm: number;
@@ -30,22 +32,58 @@ export const DEFAULT_SETTINGS: VelocityReaderSettings = {
 	paragraphsPerPage: 2,
 };
 
+export class NoteSuggestModal extends FuzzySuggestModal<TFile> {
+	onChooseFile: (file: TFile) => void;
+
+	constructor(app: App, onChooseFile: (file: TFile) => void) {
+		super(app);
+		this.onChooseFile = onChooseFile;
+		this.setPlaceholder("Search or choose a note from any folder...");
+	}
+
+	getItems(): TFile[] {
+		return this.app.vault.getMarkdownFiles().sort((a, b) => a.path.localeCompare(b.path));
+	}
+
+	getItemText(file: TFile): string {
+		return file.path;
+	}
+
+	onChooseItem(file: TFile, _evt: MouseEvent | KeyboardEvent): void {
+		this.onChooseFile(file);
+	}
+}
+
 export default class VelocityReaderPlugin extends Plugin {
 	settings: VelocityReaderSettings = DEFAULT_SETTINGS;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 
-		// 1. Register Editor Command
+		// 1. Ribbon Icon on the left sidebar (with speedometer/gauge icon)
+		this.addRibbonIcon("gauge", "Velocity Reader", (_evt: MouseEvent) => {
+			this.handleRibbonClick();
+		});
+
+		// 2. Editor Command: Speed Read Selected Text or Active Note
 		this.addCommand({
 			id: "velocity-speed-read-selected",
-			name: "Speed Read Selected Text",
+			name: "Speed Read Selected Text or Active Note",
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.launchReaderFromEditor(editor, view);
 			},
 		});
 
-		// 2. Register Context Menu Item on Right-Click
+		// 3. Command: Choose Note from Any Folder to Speed Read
+		this.addCommand({
+			id: "velocity-speed-read-choose-note",
+			name: "Choose Note from Any Folder to Speed Read",
+			callback: () => {
+				this.promptChooseNoteAndRead();
+			},
+		});
+
+		// 4. Register Context Menu Item on Right-Click
 		this.registerEvent(
 			this.app.workspace.on("editor-menu", (menu, editor, view) => {
 				if (!(view instanceof MarkdownView)) return;
@@ -64,12 +102,12 @@ export default class VelocityReaderPlugin extends Plugin {
 			})
 		);
 
-		// 3. Settings Tab
+		// 5. Settings Tab
 		this.addSettingTab(new VelocityReaderSettingTab(this.app, this));
 	}
 
 	onunload(): void {
-		// Clean up on unload if needed
+		// Clean up
 	}
 
 	async loadSettings(): Promise<void> {
@@ -81,14 +119,55 @@ export default class VelocityReaderPlugin extends Plugin {
 	}
 
 	/**
+	 * Handles clicking the ribbon icon on the left bar.
+	 * If an active note is open with content, launches reading for it.
+	 * If no note is open, automatically prompts the note picker.
+	 */
+	handleRibbonClick(): void {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (activeView && activeView.editor) {
+			this.launchReaderFromEditor(activeView.editor, activeView);
+		} else {
+			this.promptChooseNoteAndRead();
+		}
+	}
+
+	/**
+	 * Opens a search modal allowing the user to pick any markdown file from any vault folder.
+	 */
+	promptChooseNoteAndRead(callback?: (file: TFile, doc: ProcessedDocument) => void): void {
+		new NoteSuggestModal(this.app, async (file: TFile) => {
+			try {
+				const content = await this.app.vault.read(file);
+				const processed = processText(content);
+				if (processed.words.length === 0) {
+					new Notice(`Velocity Reader: No readable text found in "${file.basename}".`);
+					return;
+				}
+
+				if (callback) {
+					callback(file, processed);
+				} else {
+					new SpeedReaderModal(this.app, this, processed, file.basename).open();
+				}
+			} catch (err) {
+				console.error("Velocity Reader: Error reading file", err);
+				new Notice(`Velocity Reader: Could not read file "${file.basename}".`);
+			}
+		}).open();
+	}
+
+	/**
 	 * Extracts text from editor (selection or cursor to end of document)
 	 * and launches the SpeedReaderModal.
 	 */
-	launchReaderFromEditor(editor: Editor, _view: MarkdownView): void {
+	launchReaderFromEditor(editor: Editor, view: MarkdownView): void {
 		let textToRead = "";
+		let title = view.file ? view.file.basename : "Selection";
 
 		if (editor.somethingSelected()) {
 			textToRead = editor.getSelection();
+			title = `${title} (Selection)`;
 		} else {
 			const cursor = editor.getCursor();
 			const lastLine = editor.lineCount() - 1;
@@ -105,7 +184,7 @@ export default class VelocityReaderPlugin extends Plugin {
 			return;
 		}
 
-		new SpeedReaderModal(this.app, this, processed).open();
+		new SpeedReaderModal(this.app, this, processed, title).open();
 	}
 }
 
