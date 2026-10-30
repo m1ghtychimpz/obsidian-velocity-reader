@@ -14,6 +14,7 @@ interface CachedWordElement {
 export class SpeedReaderModal extends Modal {
 	plugin: VelocityReaderPlugin;
 	doc: ProcessedDocument;
+	documentTitle: string;
 
 	// State
 	currentIndex: number = 0;
@@ -46,6 +47,7 @@ export class SpeedReaderModal extends Modal {
 	private contextContainer!: HTMLElement;
 	private contextContentEl!: HTMLElement;
 
+	private titleDocEl!: HTMLElement;
 	private playPauseBtn!: HTMLButtonElement;
 	private modeToggleBtn!: HTMLButtonElement;
 	private speedSlider!: HTMLInputElement;
@@ -56,10 +58,11 @@ export class SpeedReaderModal extends Modal {
 
 	private boundKeyDownHandler: (evt: KeyboardEvent) => void;
 
-	constructor(app: App, plugin: VelocityReaderPlugin, doc: ProcessedDocument) {
+	constructor(app: App, plugin: VelocityReaderPlugin, doc: ProcessedDocument, documentTitle: string = "Selection") {
 		super(app);
 		this.plugin = plugin;
 		this.doc = doc;
+		this.documentTitle = documentTitle;
 		this.currentWpm = this.plugin.settings.defaultWpm;
 		this.mode = this.plugin.settings.defaultMode;
 		this.smartMicroPauses = this.plugin.settings.smartMicroPauses;
@@ -93,20 +96,61 @@ export class SpeedReaderModal extends Modal {
 		this.contentEl.empty();
 	}
 
+	/**
+	 * Switches the active document inside the open modal
+	 */
+	public loadNewDocument(newDoc: ProcessedDocument, title: string = "Document"): void {
+		this.pause();
+		this.doc = newDoc;
+		this.documentTitle = title;
+		this.currentIndex = 0;
+		this.wordTimeElapsed = 0;
+		this.cachedChunkStartPara = -1;
+		this.cachedChunkEndPara = -1;
+		this.cachedWordElements.clear();
+
+		if (this.titleDocEl) {
+			this.titleDocEl.setText(this.documentTitle);
+		}
+
+		this.applyMode();
+		this.renderCurrentWord();
+		this.updateProgressUi();
+	}
+
 	// ==========================================
 	// UI BUILDERS
 	// ==========================================
 
 	private buildHeader(parent: HTMLElement): void {
 		const header = parent.createDiv({ cls: "velocity-header" });
-		const title = header.createDiv({ cls: "velocity-title" });
-		title.createSpan({ text: "Velocity Reader", cls: "velocity-title-brand" });
+
+		const titleLeft = header.createDiv({ cls: "velocity-title-container" });
+		titleLeft.createSpan({ text: "Velocity Reader", cls: "velocity-title-brand" });
+		this.titleDocEl = titleLeft.createSpan({
+			text: this.documentTitle,
+			cls: "velocity-title-doc",
+		});
 
 		const rightControls = header.createDiv({ cls: "velocity-header-right" });
 
+		// Choose note button (allows picking any file from vault)
+		const chooseNoteBtn = rightControls.createEl("button", {
+			cls: "velocity-btn velocity-btn-choose-note",
+			text: "📂 Choose Note",
+			attr: { "aria-label": "Select another note to read" },
+		});
+		chooseNoteBtn.addEventListener("click", () => {
+			this.pause();
+			this.plugin.promptChooseNoteAndRead((file, processedDoc) => {
+				this.loadNewDocument(processedDoc, file.basename);
+			});
+			chooseNoteBtn.blur();
+		});
+
 		this.modeToggleBtn = rightControls.createEl("button", {
 			cls: "velocity-btn velocity-btn-mode",
-			text: this.mode === "rsvp" ? "Mode: RSVP (Prime)" : "Mode: Context Flow",
+			text: this.mode === "rsvp" ? "Mode: RSVP" : "Mode: Flow",
 		});
 		this.modeToggleBtn.addEventListener("click", () => {
 			this.toggleMode();
@@ -295,8 +339,6 @@ export class SpeedReaderModal extends Modal {
 		const durationMs = this.calculateWordDurationMs(currentWord);
 
 		if (this.wordTimeElapsed >= durationMs) {
-			// Advance to next word(s)
-			// Deduct duration to avoid drift at ultra-high speeds (3000 WPM)
 			while (this.wordTimeElapsed >= durationMs && this.isPlaying) {
 				this.wordTimeElapsed -= durationMs;
 				this.currentIndex++;
@@ -319,7 +361,6 @@ export class SpeedReaderModal extends Modal {
 
 	private calculateWordDurationMs(word: ParsedWord | undefined): number {
 		if (!word) return 100;
-		// Base duration for 1 word at current WPM
 		const baseMs = (60 / this.currentWpm) * 1000;
 		if (this.smartMicroPauses) {
 			return baseMs * word.pauseMultiplier;
@@ -335,11 +376,11 @@ export class SpeedReaderModal extends Modal {
 		if (this.mode === "rsvp") {
 			this.rsvpContainer.removeClass("is-hidden");
 			this.contextContainer.addClass("is-hidden");
-			this.modeToggleBtn.setText("Mode: RSVP (Prime)");
+			this.modeToggleBtn.setText("Mode: RSVP");
 		} else {
 			this.rsvpContainer.addClass("is-hidden");
 			this.contextContainer.removeClass("is-hidden");
-			this.modeToggleBtn.setText("Mode: Context Flow");
+			this.modeToggleBtn.setText("Mode: Flow");
 			this.ensureContextChunkLoaded(this.currentIndex);
 		}
 	}
@@ -374,7 +415,6 @@ export class SpeedReaderModal extends Modal {
 
 		const targetParaIdx = word.paragraphIndex;
 
-		// Check if target paragraph is within currently loaded chunk
 		if (
 			this.cachedChunkStartPara !== -1 &&
 			targetParaIdx >= this.cachedChunkStartPara &&
@@ -383,7 +423,6 @@ export class SpeedReaderModal extends Modal {
 			return;
 		}
 
-		// Calculate paragraph chunk window [chunkStartPara, chunkEndPara]
 		const chunkStart = targetParaIdx;
 		const chunkEnd = Math.min(
 			this.doc.paragraphs.length - 1,
@@ -393,7 +432,6 @@ export class SpeedReaderModal extends Modal {
 		this.cachedChunkStartPara = chunkStart;
 		this.cachedChunkEndPara = chunkEnd;
 
-		// Clear cached elements and rebuild DOM once for this page
 		this.contextContentEl.empty();
 		this.cachedWordElements.clear();
 		this.activeWordElement = null;
@@ -430,7 +468,6 @@ export class SpeedReaderModal extends Modal {
 					text: wObj.saccadic.trailChars,
 				});
 
-				// Append trailing space so words don't collide
 				pEl.appendText(" ");
 
 				this.cachedWordElements.set(wObj.index, {
@@ -446,7 +483,6 @@ export class SpeedReaderModal extends Modal {
 	private updateContextHighlighting(activeIdx: number): void {
 		this.ensureContextChunkLoaded(activeIdx);
 
-		// Remove previous active classes without DOM mutation
 		if (this.prevWordElement) {
 			this.prevWordElement.container.removeClass("is-prev-word");
 			this.prevWordElement = null;
@@ -460,21 +496,18 @@ export class SpeedReaderModal extends Modal {
 			this.nextWordElement = null;
 		}
 
-		// Apply Word N-1 (Trail Highlight)
 		const prev = this.cachedWordElements.get(activeIdx - 1);
 		if (prev) {
 			prev.container.addClass("is-prev-word");
 			this.prevWordElement = prev;
 		}
 
-		// Apply Word N (Active Full Highlight)
 		const curr = this.cachedWordElements.get(activeIdx);
 		if (curr) {
 			curr.container.addClass("is-active-word");
 			this.activeWordElement = curr;
 		}
 
-		// Apply Word N+1 (Lead Pre-highlight)
 		const next = this.cachedWordElements.get(activeIdx + 1);
 		if (next) {
 			next.container.addClass("is-next-word");
@@ -507,7 +540,6 @@ export class SpeedReaderModal extends Modal {
 
 	public skipWords(count: number): void {
 		if (count < 0) {
-			// Find previous sentence boundary or step backwards
 			let target = this.currentIndex + count;
 			for (let i = this.currentIndex - 1; i >= Math.max(0, this.currentIndex + count); i--) {
 				if (this.doc.words[i]?.isSentenceEnd) {
@@ -517,7 +549,6 @@ export class SpeedReaderModal extends Modal {
 			}
 			this.seekToWord(Math.max(0, target));
 		} else {
-			// Find next sentence boundary or step forward
 			let target = this.currentIndex + count;
 			for (let i = this.currentIndex; i < Math.min(this.doc.words.length, this.currentIndex + count); i++) {
 				if (this.doc.words[i]?.isSentenceEnd) {
@@ -537,7 +568,6 @@ export class SpeedReaderModal extends Modal {
 		this.progressBarFill.style.width = `${pct}%`;
 		this.progressPercentDisplay.setText(`${pct}% (${this.currentIndex + 1}/${total} words)`);
 
-		// Compute estimated time remaining in seconds
 		let remainingMs = 0;
 		const baseMs = (60 / this.currentWpm) * 1000;
 		for (let i = this.currentIndex; i < total; i++) {
@@ -570,7 +600,6 @@ export class SpeedReaderModal extends Modal {
 	// ==========================================
 
 	private handleKeyDown(evt: KeyboardEvent): void {
-		// Avoid intercepting when editing input or if modifier keys like Ctrl/Cmd are pressed
 		if (evt.ctrlKey || evt.altKey || evt.metaKey) return;
 
 		switch (evt.code) {

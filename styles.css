@@ -35,17 +35,45 @@
 	padding-bottom: 12px;
 }
 
+.velocity-title-container {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	overflow: hidden;
+}
+
 .velocity-title-brand {
 	font-size: 1.15rem;
 	font-weight: 700;
 	letter-spacing: -0.02em;
 	color: var(--text-normal);
+	white-space: nowrap;
+}
+
+.velocity-title-doc {
+	font-size: 0.8rem;
+	font-weight: 500;
+	padding: 2px 8px;
+	border-radius: 4px;
+	background: var(--background-secondary-alt);
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 220px;
 }
 
 .velocity-header-right {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
+	flex-shrink: 0;
+}
+
+.velocity-btn-choose-note {
+	background: var(--background-secondary);
+	color: var(--text-normal);
 }
 
 /* ------------------------------------------------------------
@@ -444,4 +472,63 @@
 	font-size: 0.8rem;
 	color: var(--text-muted);
 	font-family: var(--font-monospace, monospace);
+}
+
+/* ------------------------------------------------------------
+   Mobile & Small Screen Responsiveness
+   ------------------------------------------------------------ */
+@media (max-width: 680px) {
+	.velocity-reader-modal {
+		width: 96vw;
+		max-width: 96vw;
+		max-height: 92vh;
+	}
+
+	.velocity-reader-modal .modal-content {
+		padding: 12px 14px;
+		gap: 12px;
+	}
+
+	.velocity-header {
+		padding-bottom: 8px;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.velocity-title-doc {
+		max-width: 130px;
+	}
+
+	.velocity-header-right {
+		gap: 6px;
+	}
+
+	.velocity-btn {
+		padding: 5px 10px;
+		font-size: 0.82rem;
+	}
+
+	.velocity-viewport {
+		min-height: 180px;
+		padding: 14px;
+	}
+
+	.velocity-controls-bar {
+		gap: 10px;
+		justify-content: center;
+	}
+
+	.velocity-control-group {
+		justify-content: center;
+	}
+
+	.velocity-speed-group {
+		flex: 1 1 100%;
+		justify-content: center;
+		min-width: 100%;
+	}
+
+	.velocity-slider {
+		width: 120px;
+	}
 }
