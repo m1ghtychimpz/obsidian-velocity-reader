@@ -25,6 +25,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var main_exports = {};
 __export(main_exports, {
   DEFAULT_SETTINGS: () => DEFAULT_SETTINGS,
+  NoteSuggestModal: () => NoteSuggestModal,
   default: () => VelocityReaderPlugin
 });
 module.exports = __toCommonJS(main_exports);
@@ -33,7 +34,7 @@ var import_obsidian2 = require("obsidian");
 // src/speedReaderModal.ts
 var import_obsidian = require("obsidian");
 var SpeedReaderModal = class extends import_obsidian.Modal {
-  constructor(app, plugin, doc) {
+  constructor(app, plugin, doc, documentTitle = "Selection") {
     super(app);
     // State
     this.currentIndex = 0;
@@ -51,6 +52,7 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
     this.nextWordElement = null;
     this.plugin = plugin;
     this.doc = doc;
+    this.documentTitle = documentTitle;
     this.currentWpm = this.plugin.settings.defaultWpm;
     this.mode = this.plugin.settings.defaultMode;
     this.smartMicroPauses = this.plugin.settings.smartMicroPauses;
@@ -76,17 +78,52 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
     this.cachedWordElements.clear();
     this.contentEl.empty();
   }
+  /**
+   * Switches the active document inside the open modal
+   */
+  loadNewDocument(newDoc, title = "Document") {
+    this.pause();
+    this.doc = newDoc;
+    this.documentTitle = title;
+    this.currentIndex = 0;
+    this.wordTimeElapsed = 0;
+    this.cachedChunkStartPara = -1;
+    this.cachedChunkEndPara = -1;
+    this.cachedWordElements.clear();
+    if (this.titleDocEl) {
+      this.titleDocEl.setText(this.documentTitle);
+    }
+    this.applyMode();
+    this.renderCurrentWord();
+    this.updateProgressUi();
+  }
   // ==========================================
   // UI BUILDERS
   // ==========================================
   buildHeader(parent) {
     const header = parent.createDiv({ cls: "velocity-header" });
-    const title = header.createDiv({ cls: "velocity-title" });
-    title.createSpan({ text: "Velocity Reader", cls: "velocity-title-brand" });
+    const titleLeft = header.createDiv({ cls: "velocity-title-container" });
+    titleLeft.createSpan({ text: "Velocity Reader", cls: "velocity-title-brand" });
+    this.titleDocEl = titleLeft.createSpan({
+      text: this.documentTitle,
+      cls: "velocity-title-doc"
+    });
     const rightControls = header.createDiv({ cls: "velocity-header-right" });
+    const chooseNoteBtn = rightControls.createEl("button", {
+      cls: "velocity-btn velocity-btn-choose-note",
+      text: "\u{1F4C2} Choose Note",
+      attr: { "aria-label": "Select another note to read" }
+    });
+    chooseNoteBtn.addEventListener("click", () => {
+      this.pause();
+      this.plugin.promptChooseNoteAndRead((file, processedDoc) => {
+        this.loadNewDocument(processedDoc, file.basename);
+      });
+      chooseNoteBtn.blur();
+    });
     this.modeToggleBtn = rightControls.createEl("button", {
       cls: "velocity-btn velocity-btn-mode",
-      text: this.mode === "rsvp" ? "Mode: RSVP (Prime)" : "Mode: Context Flow"
+      text: this.mode === "rsvp" ? "Mode: RSVP" : "Mode: Flow"
     });
     this.modeToggleBtn.addEventListener("click", () => {
       this.toggleMode();
@@ -200,8 +237,7 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
   // TIMING ENGINE & PLAYBACK LOOP
   // ==========================================
   play() {
-    if (this.doc.words.length === 0)
-      return;
+    if (this.doc.words.length === 0) return;
     if (this.currentIndex >= this.doc.words.length - 1) {
       this.currentIndex = 0;
     }
@@ -231,8 +267,7 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
     }
   }
   onAnimationTick(now) {
-    if (!this.isPlaying)
-      return;
+    if (!this.isPlaying) return;
     const deltaMs = now - this.lastFrameTime;
     this.lastFrameTime = now;
     this.wordTimeElapsed += deltaMs;
@@ -256,8 +291,7 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
     this.rafId = requestAnimationFrame(this.onAnimationTick.bind(this));
   }
   calculateWordDurationMs(word) {
-    if (!word)
-      return 100;
+    if (!word) return 100;
     const baseMs = 60 / this.currentWpm * 1e3;
     if (this.smartMicroPauses) {
       return baseMs * word.pauseMultiplier;
@@ -271,11 +305,11 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
     if (this.mode === "rsvp") {
       this.rsvpContainer.removeClass("is-hidden");
       this.contextContainer.addClass("is-hidden");
-      this.modeToggleBtn.setText("Mode: RSVP (Prime)");
+      this.modeToggleBtn.setText("Mode: RSVP");
     } else {
       this.rsvpContainer.addClass("is-hidden");
       this.contextContainer.removeClass("is-hidden");
-      this.modeToggleBtn.setText("Mode: Context Flow");
+      this.modeToggleBtn.setText("Mode: Flow");
       this.ensureContextChunkLoaded(this.currentIndex);
     }
   }
@@ -302,8 +336,7 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
   }
   ensureContextChunkLoaded(wordIndex) {
     const word = this.doc.words[wordIndex];
-    if (!word)
-      return;
+    if (!word) return;
     const targetParaIdx = word.paragraphIndex;
     if (this.cachedChunkStartPara !== -1 && targetParaIdx >= this.cachedChunkStartPara && targetParaIdx <= this.cachedChunkEndPara) {
       return;
@@ -322,8 +355,7 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
     this.nextWordElement = null;
     for (let p = chunkStart; p <= chunkEnd; p++) {
       const paragraph = this.doc.paragraphs[p];
-      if (!paragraph)
-        continue;
+      if (!paragraph) continue;
       const pEl = this.contextContentEl.createEl("p", {
         cls: "velocity-context-paragraph"
       });
@@ -426,8 +458,7 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
   }
   updateProgressUi() {
     const total = this.doc.words.length;
-    if (total === 0)
-      return;
+    if (total === 0) return;
     const pct = Math.round((this.currentIndex + 1) / total * 100);
     this.progressBarFill.style.width = `${pct}%`;
     this.progressPercentDisplay.setText(`${pct}% (${this.currentIndex + 1}/${total} words)`);
@@ -458,8 +489,7 @@ var SpeedReaderModal = class extends import_obsidian.Modal {
   // KEYBOARD SHORTCUTS
   // ==========================================
   handleKeyDown(evt) {
-    if (evt.ctrlKey || evt.altKey || evt.metaKey)
-      return;
+    if (evt.ctrlKey || evt.altKey || evt.metaKey) return;
     switch (evt.code) {
       case "Space":
         evt.preventDefault();
@@ -527,14 +557,10 @@ function stripMarkdownFormatting(rawMarkdown) {
 function calculateOrpIndex(word) {
   const chars = Array.from(word);
   const len = chars.length;
-  if (len <= 1)
-    return 0;
-  if (len <= 5)
-    return 1;
-  if (len <= 9)
-    return 2;
-  if (len <= 13)
-    return 3;
+  if (len <= 1) return 0;
+  if (len <= 5) return 1;
+  if (len <= 9) return 2;
+  if (len <= 13) return 3;
   return 4;
 }
 function splitWordForOrp(word) {
@@ -578,8 +604,14 @@ function splitWordForSaccadic(word) {
 function calculatePauseMetadata(word) {
   const trimmedTrailingQuotes = word.replace(/['"”’)\]}]+$/, "");
   const lastChar = trimmedTrailingQuotes.slice(-1);
-  const cleanWord = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-  const cleanLength = Array.from(cleanWord || word).length;
+  let cleanLength = 0;
+  try {
+    const cleanWord = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+    cleanLength = Array.from(cleanWord || word).length;
+  } catch (_e) {
+    const fallbackWord = word.replace(/^[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF]+|[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF]+$/g, "");
+    cleanLength = Array.from(fallbackWord || word).length;
+  }
   let pauseMultiplier = 1;
   let isSentenceEnd = false;
   if (lastChar === "." || lastChar === "!" || lastChar === "?") {
@@ -657,6 +689,22 @@ var DEFAULT_SETTINGS = {
   smartMicroPauses: true,
   paragraphsPerPage: 2
 };
+var NoteSuggestModal = class extends import_obsidian2.FuzzySuggestModal {
+  constructor(app, onChooseFile) {
+    super(app);
+    this.onChooseFile = onChooseFile;
+    this.setPlaceholder("Search or choose a note from any folder...");
+  }
+  getItems() {
+    return this.app.vault.getMarkdownFiles().sort((a, b) => a.path.localeCompare(b.path));
+  }
+  getItemText(file) {
+    return file.path;
+  }
+  onChooseItem(file, _evt) {
+    this.onChooseFile(file);
+  }
+};
 var VelocityReaderPlugin = class extends import_obsidian2.Plugin {
   constructor() {
     super(...arguments);
@@ -664,17 +712,26 @@ var VelocityReaderPlugin = class extends import_obsidian2.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    this.addRibbonIcon("gauge", "Velocity Reader", (_evt) => {
+      this.handleRibbonClick();
+    });
     this.addCommand({
       id: "velocity-speed-read-selected",
-      name: "Speed Read Selected Text",
+      name: "Speed Read Selected Text or Active Note",
       editorCallback: (editor, view) => {
         this.launchReaderFromEditor(editor, view);
       }
     });
+    this.addCommand({
+      id: "velocity-speed-read-choose-note",
+      name: "Choose Note from Any Folder to Speed Read",
+      callback: () => {
+        this.promptChooseNoteAndRead();
+      }
+    });
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor, view) => {
-        if (!(view instanceof import_obsidian2.MarkdownView))
-          return;
+        if (!(view instanceof import_obsidian2.MarkdownView)) return;
         const hasSelection = editor.somethingSelected();
         menu.addItem((item) => {
           item.setTitle(
@@ -696,13 +753,51 @@ var VelocityReaderPlugin = class extends import_obsidian2.Plugin {
     await this.saveData(this.settings);
   }
   /**
+   * Handles clicking the ribbon icon on the left bar.
+   * If an active note is open with content, launches reading for it.
+   * If no note is open, automatically prompts the note picker.
+   */
+  handleRibbonClick() {
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
+    if (activeView && activeView.editor) {
+      this.launchReaderFromEditor(activeView.editor, activeView);
+    } else {
+      this.promptChooseNoteAndRead();
+    }
+  }
+  /**
+   * Opens a search modal allowing the user to pick any markdown file from any vault folder.
+   */
+  promptChooseNoteAndRead(callback) {
+    new NoteSuggestModal(this.app, async (file) => {
+      try {
+        const content = await this.app.vault.read(file);
+        const processed = processText(content);
+        if (processed.words.length === 0) {
+          new import_obsidian2.Notice(`Velocity Reader: No readable text found in "${file.basename}".`);
+          return;
+        }
+        if (callback) {
+          callback(file, processed);
+        } else {
+          new SpeedReaderModal(this.app, this, processed, file.basename).open();
+        }
+      } catch (err) {
+        console.error("Velocity Reader: Error reading file", err);
+        new import_obsidian2.Notice(`Velocity Reader: Could not read file "${file.basename}".`);
+      }
+    }).open();
+  }
+  /**
    * Extracts text from editor (selection or cursor to end of document)
    * and launches the SpeedReaderModal.
    */
-  launchReaderFromEditor(editor, _view) {
+  launchReaderFromEditor(editor, view) {
     let textToRead = "";
+    let title = view.file ? view.file.basename : "Selection";
     if (editor.somethingSelected()) {
       textToRead = editor.getSelection();
+      title = `${title} (Selection)`;
     } else {
       const cursor = editor.getCursor();
       const lastLine = editor.lineCount() - 1;
@@ -717,7 +812,7 @@ var VelocityReaderPlugin = class extends import_obsidian2.Plugin {
       new import_obsidian2.Notice("Velocity Reader: No readable text found to read.");
       return;
     }
-    new SpeedReaderModal(this.app, this, processed).open();
+    new SpeedReaderModal(this.app, this, processed, title).open();
   }
 };
 var VelocityReaderSettingTab = class extends import_obsidian2.PluginSettingTab {
