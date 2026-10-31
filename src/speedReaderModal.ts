@@ -69,6 +69,7 @@ export class SpeedReaderModal extends Modal {
 	private speedValueDisplay!: HTMLElement;
 	private progressBarFill!: HTMLElement;
 	private progressPercentDisplay!: HTMLElement;
+	private progressPageDisplay!: HTMLElement;
 	private progressTimeDisplay!: HTMLElement;
 
 	private boundKeyDownHandler: (evt: KeyboardEvent) => void;
@@ -239,10 +240,20 @@ export class SpeedReaderModal extends Modal {
 		// Left Group: Navigation & Play/Pause
 		const playbackGroup = controlsBar.createDiv({ cls: "velocity-control-group" });
 
+		const prevPageBtn = playbackGroup.createEl("button", {
+			cls: "velocity-btn velocity-btn-secondary velocity-btn-page",
+			text: "⏮ Strana",
+			attr: { "aria-label": "Predchádzajúca strana (PageUp alebo [ )" },
+		});
+		prevPageBtn.addEventListener("click", () => {
+			this.prevPage();
+			prevPageBtn.blur();
+		});
+
 		const skipBackBtn = playbackGroup.createEl("button", {
 			cls: "velocity-btn velocity-btn-secondary",
-			text: "⏮ -10w",
-			attr: { "aria-label": "Skip backward 10 words or sentence (Left Arrow)" },
+			text: "◀ -10w",
+			attr: { "aria-label": "Preskočiť späť o 10 slov (Šípka doľava)" },
 		});
 		skipBackBtn.addEventListener("click", () => {
 			this.skipWords(-10);
@@ -252,7 +263,7 @@ export class SpeedReaderModal extends Modal {
 		this.playPauseBtn = playbackGroup.createEl("button", {
 			cls: "velocity-btn velocity-btn-primary velocity-btn-play",
 			text: "▶ Play",
-			attr: { "aria-label": "Toggle playback (Spacebar)" },
+			attr: { "aria-label": "Spustiť / Pozastaviť (Medzerník)" },
 		});
 		this.playPauseBtn.addEventListener("click", () => {
 			this.togglePlay();
@@ -261,12 +272,22 @@ export class SpeedReaderModal extends Modal {
 
 		const skipFwdBtn = playbackGroup.createEl("button", {
 			cls: "velocity-btn velocity-btn-secondary",
-			text: "+10w ⏭",
-			attr: { "aria-label": "Skip forward 10 words or sentence (Right Arrow)" },
+			text: "+10w ▶",
+			attr: { "aria-label": "Preskočiť dopredu o 10 slov (Šípka doprava)" },
 		});
 		skipFwdBtn.addEventListener("click", () => {
 			this.skipWords(10);
 			skipFwdBtn.blur();
+		});
+
+		const nextPageBtn = playbackGroup.createEl("button", {
+			cls: "velocity-btn velocity-btn-secondary velocity-btn-page",
+			text: "Strana ⏭",
+			attr: { "aria-label": "Ďalšia strana (PageDown alebo ] )" },
+		});
+		nextPageBtn.addEventListener("click", () => {
+			this.nextPage();
+			nextPageBtn.blur();
 		});
 
 		// Right Group: Speed Slider and Numeric Readout
@@ -316,6 +337,11 @@ export class SpeedReaderModal extends Modal {
 		this.progressPercentDisplay = metaRow.createSpan({
 			cls: "velocity-meta-percent",
 			text: "0%",
+		});
+
+		this.progressPageDisplay = metaRow.createSpan({
+			cls: "velocity-meta-page",
+			text: "Strana 1 / 1",
 		});
 
 		this.progressTimeDisplay = metaRow.createSpan({
@@ -498,10 +524,12 @@ export class SpeedReaderModal extends Modal {
 			return;
 		}
 
-		const chunkStart = targetParaIdx;
+		const pageSize = Math.max(1, this.paragraphsPerPage);
+		const pageIndex = Math.floor(targetParaIdx / pageSize);
+		const chunkStart = pageIndex * pageSize;
 		const chunkEnd = Math.min(
 			this.readingDoc.paragraphs.length - 1,
-			chunkStart + this.paragraphsPerPage - 1
+			chunkStart + pageSize - 1
 		);
 
 		this.cachedChunkStartPara = chunkStart;
@@ -544,6 +572,10 @@ export class SpeedReaderModal extends Modal {
 				});
 
 				pEl.appendText(" ");
+
+				wordSpan.addEventListener("click", () => {
+					this.seekToWord(wObj.index);
+				});
 
 				this.cachedWordElements.set(wObj.index, {
 					container: wordSpan,
@@ -607,10 +639,12 @@ export class SpeedReaderModal extends Modal {
 			return;
 		}
 
-		const chunkStart = targetParaIdx;
+		const pageSize = Math.max(1, this.paragraphsPerPage);
+		const pageIndex = Math.floor(targetParaIdx / pageSize);
+		const chunkStart = pageIndex * pageSize;
 		const chunkEnd = Math.min(
 			this.readingDoc.paragraphs.length - 1,
-			chunkStart + this.paragraphsPerPage - 1
+			chunkStart + pageSize - 1
 		);
 
 		this.cachedBionicChunkStartPara = chunkStart;
@@ -646,6 +680,10 @@ export class SpeedReaderModal extends Modal {
 				});
 
 				pEl.appendText(" ");
+
+				wordSpan.addEventListener("click", () => {
+					this.seekToWord(wObj.index);
+				});
 
 				this.cachedBionicWordElements.set(wObj.index, {
 					container: wordSpan,
@@ -690,16 +728,63 @@ export class SpeedReaderModal extends Modal {
 		this.setWpm(this.currentWpm + delta);
 	}
 
-	public seekToWord(index: number): void {
+	public seekToWord(index: number, forceScrollTop = false): void {
 		this.currentIndex = Math.max(0, Math.min(this.readingDoc.words.length - 1, index));
 		this.wordTimeElapsed = 0;
 		this.renderCurrentWord();
 		this.updateProgressUi();
 
+		if (forceScrollTop) {
+			if (this.mode === "context" && this.contextContainer) {
+				this.contextContainer.scrollTop = 0;
+			} else if (this.mode === "bionic" && this.bionicContainer) {
+				this.bionicContainer.scrollTop = 0;
+			}
+			return;
+		}
+
 		if (this.mode === "context" && this.activeWordElement) {
 			this.scrollWordIntoView(this.activeWordElement.container, this.contextContainer, true);
 		} else if (this.mode === "bionic" && this.activeBionicWordElement) {
 			this.scrollWordIntoView(this.activeBionicWordElement.container, this.bionicContainer, true);
+		}
+	}
+
+	public nextPage(): void {
+		if (!this.readingDoc || this.readingDoc.paragraphs.length === 0) return;
+		const currentWord = this.readingDoc.words[this.currentIndex];
+		const currentPara = currentWord ? currentWord.paragraphIndex : 0;
+		const pageSize = Math.max(1, this.paragraphsPerPage);
+		const currentPage = Math.floor(currentPara / pageSize);
+		const totalPages = Math.max(1, Math.ceil(this.readingDoc.paragraphs.length / pageSize));
+
+		if (currentPage < totalPages - 1) {
+			const targetPara = (currentPage + 1) * pageSize;
+			const targetWord = this.readingDoc.paragraphs[targetPara]?.startWordIndex;
+			if (targetWord !== undefined) {
+				this.seekToWord(targetWord, true);
+			}
+		} else {
+			this.seekToWord(this.readingDoc.words.length - 1);
+		}
+	}
+
+	public prevPage(): void {
+		if (!this.readingDoc || this.readingDoc.paragraphs.length === 0) return;
+		const currentWord = this.readingDoc.words[this.currentIndex];
+		const currentPara = currentWord ? currentWord.paragraphIndex : 0;
+		const pageSize = Math.max(1, this.paragraphsPerPage);
+		const currentPage = Math.floor(currentPara / pageSize);
+		const currentParaStartWord = this.readingDoc.paragraphs[currentPage * pageSize]?.startWordIndex ?? 0;
+
+		if (this.currentIndex > currentParaStartWord + 3) {
+			this.seekToWord(currentParaStartWord, true);
+		} else if (currentPage > 0) {
+			const targetPara = (currentPage - 1) * pageSize;
+			const targetWord = this.readingDoc.paragraphs[targetPara]?.startWordIndex ?? 0;
+			this.seekToWord(targetWord, true);
+		} else {
+			this.seekToWord(0, true);
 		}
 	}
 
@@ -731,7 +816,17 @@ export class SpeedReaderModal extends Modal {
 
 		const pct = Math.round(((this.currentIndex + 1) / total) * 100);
 		this.progressBarFill.style.width = `${pct}%`;
-		this.progressPercentDisplay.setText(`${pct}% (${this.currentIndex + 1}/${total} words)`);
+		this.progressPercentDisplay.setText(`${pct}% (${this.currentIndex + 1}/${total} slov)`);
+
+		const currentWord = this.readingDoc.words[this.currentIndex];
+		const currentPara = currentWord ? currentWord.paragraphIndex : 0;
+		const pageSize = Math.max(1, this.paragraphsPerPage);
+		const currentPage = Math.floor(currentPara / pageSize) + 1;
+		const totalPages = Math.max(1, Math.ceil(this.readingDoc.paragraphs.length / pageSize));
+
+		if (this.progressPageDisplay) {
+			this.progressPageDisplay.setText(`Strana ${currentPage} / ${totalPages}`);
+		}
 
 		let remainingMs = 0;
 		const baseMs = (60 / this.currentWpm) * 1000;
@@ -746,9 +841,9 @@ export class SpeedReaderModal extends Modal {
 		const formattedSecs = secs < 10 ? `0${secs}` : `${secs}`;
 
 		if (mins > 0) {
-			this.progressTimeDisplay.setText(`${mins}m ${formattedSecs}s remaining`);
+			this.progressTimeDisplay.setText(`${mins}m ${formattedSecs}s zostáva`);
 		} else {
-			this.progressTimeDisplay.setText(`${formattedSecs}s remaining`);
+			this.progressTimeDisplay.setText(`${formattedSecs}s zostáva`);
 		}
 	}
 
@@ -792,6 +887,16 @@ export class SpeedReaderModal extends Modal {
 			case "ArrowRight":
 				evt.preventDefault();
 				this.skipWords(10);
+				break;
+			case "PageUp":
+			case "BracketLeft":
+				evt.preventDefault();
+				this.prevPage();
+				break;
+			case "PageDown":
+			case "BracketRight":
+				evt.preventDefault();
+				this.nextPage();
 				break;
 			case "Escape":
 				evt.preventDefault();
