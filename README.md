@@ -48,6 +48,8 @@
 | **`ArrowDown`** | Decrease speed (-25 WPM) |
 | **`ArrowLeft`** | Skip backward 10 words or to previous sentence |
 | **`ArrowRight`** | Skip forward 10 words or to next sentence |
+| **`PageDown`** / **`]`** | Next page / paragraph chunk |
+| **`PageUp`** / **`[`** | Previous page / paragraph chunk |
 | **`Escape`** | Close reader modal |
 
 ---
