@@ -2,13 +2,19 @@ import { App, Modal } from "obsidian";
 import { ParsedWord, ProcessedDocument } from "./textProcessor";
 import type VelocityReaderPlugin from "./main";
 
-export type ReadingMode = "rsvp" | "context";
+export type ReadingMode = "rsvp" | "context" | "bionic";
 
 interface CachedWordElement {
 	container: HTMLElement;
 	lead: HTMLElement;
 	core: HTMLElement;
 	trail: HTMLElement;
+}
+
+interface CachedBionicWordElement {
+	container: HTMLElement;
+	fixation: HTMLElement;
+	rest: HTMLElement;
 }
 
 export class SpeedReaderModal extends Modal {
@@ -37,6 +43,12 @@ export class SpeedReaderModal extends Modal {
 	private prevWordElement: CachedWordElement | null = null;
 	private nextWordElement: CachedWordElement | null = null;
 
+	// Bionic Mode DOM Cache
+	private cachedBionicChunkStartPara: number = -1;
+	private cachedBionicChunkEndPara: number = -1;
+	private cachedBionicWordElements: Map<number, CachedBionicWordElement> = new Map();
+	private activeBionicWordElement: CachedBionicWordElement | null = null;
+
 	// UI Elements
 	private viewportContainer!: HTMLElement;
 	private rsvpContainer!: HTMLElement;
@@ -46,6 +58,9 @@ export class SpeedReaderModal extends Modal {
 
 	private contextContainer!: HTMLElement;
 	private contextContentEl!: HTMLElement;
+
+	private bionicContainer!: HTMLElement;
+	private bionicContentEl!: HTMLElement;
 
 	private titleDocEl!: HTMLElement;
 	private playPauseBtn!: HTMLButtonElement;
@@ -93,6 +108,7 @@ export class SpeedReaderModal extends Modal {
 		this.pause();
 		window.removeEventListener("keydown", this.boundKeyDownHandler, true);
 		this.cachedWordElements.clear();
+		this.cachedBionicWordElements.clear();
 		this.contentEl.empty();
 	}
 
@@ -108,6 +124,9 @@ export class SpeedReaderModal extends Modal {
 		this.cachedChunkStartPara = -1;
 		this.cachedChunkEndPara = -1;
 		this.cachedWordElements.clear();
+		this.cachedBionicChunkStartPara = -1;
+		this.cachedBionicChunkEndPara = -1;
+		this.cachedBionicWordElements.clear();
 
 		if (this.titleDocEl) {
 			this.titleDocEl.setText(this.documentTitle);
@@ -150,7 +169,7 @@ export class SpeedReaderModal extends Modal {
 
 		this.modeToggleBtn = rightControls.createEl("button", {
 			cls: "velocity-btn velocity-btn-mode",
-			text: this.mode === "rsvp" ? "Mode: RSVP" : "Mode: Flow",
+			text: this.getModeButtonText(),
 		});
 		this.modeToggleBtn.addEventListener("click", () => {
 			this.toggleMode();
@@ -163,6 +182,12 @@ export class SpeedReaderModal extends Modal {
 			attr: { "aria-label": "Close reader" },
 		});
 		closeBtn.addEventListener("click", () => this.close());
+	}
+
+	private getModeButtonText(): string {
+		if (this.mode === "rsvp") return "Mode: RSVP";
+		if (this.mode === "context") return "Mode: Flow";
+		return "Mode: Bionic";
 	}
 
 	private buildViewport(parent: HTMLElement): void {
@@ -195,6 +220,16 @@ export class SpeedReaderModal extends Modal {
 
 		this.contextContentEl = this.contextContainer.createDiv({
 			cls: "velocity-context-content",
+		});
+
+		// --- Bionic Reading Container ---
+		this.bionicContainer = this.viewportContainer.createDiv({
+			cls: "velocity-bionic-viewport",
+		});
+		this.bionicContainer.style.fontSize = `${this.plugin.settings.bionicFontSize ?? 22}px`;
+
+		this.bionicContentEl = this.bionicContainer.createDiv({
+			cls: "velocity-bionic-content",
 		});
 	}
 
@@ -373,20 +408,32 @@ export class SpeedReaderModal extends Modal {
 	// ==========================================
 
 	private applyMode(): void {
+		this.rsvpContainer.addClass("is-hidden");
+		this.contextContainer.addClass("is-hidden");
+		this.bionicContainer.addClass("is-hidden");
+
 		if (this.mode === "rsvp") {
 			this.rsvpContainer.removeClass("is-hidden");
-			this.contextContainer.addClass("is-hidden");
 			this.modeToggleBtn.setText("Mode: RSVP");
-		} else {
-			this.rsvpContainer.addClass("is-hidden");
+		} else if (this.mode === "context") {
 			this.contextContainer.removeClass("is-hidden");
 			this.modeToggleBtn.setText("Mode: Flow");
 			this.ensureContextChunkLoaded(this.currentIndex);
+		} else if (this.mode === "bionic") {
+			this.bionicContainer.removeClass("is-hidden");
+			this.modeToggleBtn.setText("Mode: Bionic");
+			this.ensureBionicChunkLoaded(this.currentIndex);
 		}
 	}
 
 	public toggleMode(): void {
-		this.mode = this.mode === "rsvp" ? "context" : "rsvp";
+		if (this.mode === "rsvp") {
+			this.mode = "context";
+		} else if (this.mode === "context") {
+			this.mode = "bionic";
+		} else {
+			this.mode = "rsvp";
+		}
 		this.applyMode();
 		this.renderCurrentWord();
 	}
@@ -404,8 +451,36 @@ export class SpeedReaderModal extends Modal {
 			this.rsvpPrefixEl.setText(currentWord.orp.prefix);
 			this.rsvpOrpEl.setText(currentWord.orp.orpChar);
 			this.rsvpSuffixEl.setText(currentWord.orp.suffix);
-		} else {
+		} else if (this.mode === "context") {
 			this.updateContextHighlighting(this.currentIndex);
+		} else if (this.mode === "bionic") {
+			this.updateBionicHighlighting(this.currentIndex);
+		}
+	}
+
+	/**
+	 * Smoothly scrolls the active reading word into view if it approaches the top/bottom viewport edges.
+	 */
+	private scrollWordIntoView(wordEl: HTMLElement, container: HTMLElement, forceCenter = false): void {
+		if (!wordEl || !container) return;
+
+		const cRect = container.getBoundingClientRect();
+		const wRect = wordEl.getBoundingClientRect();
+
+		// If container does not overflow vertically, no scrolling needed
+		if (container.scrollHeight <= container.clientHeight) return;
+
+		const buffer = 45;
+		const isAbove = wRect.top < cRect.top + buffer;
+		const isBelow = wRect.bottom > cRect.bottom - buffer;
+
+		if (forceCenter || isAbove || isBelow) {
+			const relativeTop = wRect.top - cRect.top;
+			const targetScroll = container.scrollTop + relativeTop - (cRect.height / 2) + (wRect.height / 2);
+			container.scrollTo({
+				top: Math.max(0, targetScroll),
+				behavior: forceCenter ? "auto" : "smooth",
+			});
 		}
 	}
 
@@ -478,6 +553,8 @@ export class SpeedReaderModal extends Modal {
 				});
 			}
 		}
+
+		this.contextContainer.scrollTop = 0;
 	}
 
 	private updateContextHighlighting(activeIdx: number): void {
@@ -506,12 +583,94 @@ export class SpeedReaderModal extends Modal {
 		if (curr) {
 			curr.container.addClass("is-active-word");
 			this.activeWordElement = curr;
+			this.scrollWordIntoView(curr.container, this.contextContainer);
 		}
 
 		const next = this.cachedWordElements.get(activeIdx + 1);
 		if (next) {
 			next.container.addClass("is-next-word");
 			this.nextWordElement = next;
+		}
+	}
+
+	private ensureBionicChunkLoaded(wordIndex: number): void {
+		const word = this.readingDoc.words[wordIndex];
+		if (!word) return;
+
+		const targetParaIdx = word.paragraphIndex;
+
+		if (
+			this.cachedBionicChunkStartPara !== -1 &&
+			targetParaIdx >= this.cachedBionicChunkStartPara &&
+			targetParaIdx <= this.cachedBionicChunkEndPara
+		) {
+			return;
+		}
+
+		const chunkStart = targetParaIdx;
+		const chunkEnd = Math.min(
+			this.readingDoc.paragraphs.length - 1,
+			chunkStart + this.paragraphsPerPage - 1
+		);
+
+		this.cachedBionicChunkStartPara = chunkStart;
+		this.cachedBionicChunkEndPara = chunkEnd;
+
+		this.bionicContentEl.empty();
+		this.cachedBionicWordElements.clear();
+		this.activeBionicWordElement = null;
+
+		for (let p = chunkStart; p <= chunkEnd; p++) {
+			const paragraph = this.readingDoc.paragraphs[p];
+			if (!paragraph) continue;
+
+			const pEl = this.bionicContentEl.createEl("p", {
+				cls: "velocity-bionic-paragraph",
+			});
+
+			for (let w = 0; w < paragraph.words.length; w++) {
+				const wObj = paragraph.words[w];
+
+				const wordSpan = pEl.createSpan({
+					cls: "velocity-bionic-word",
+				});
+
+				const fixation = wordSpan.createEl("b", {
+					cls: "velocity-bionic-fixation",
+					text: wObj.bionic.fixation,
+				});
+
+				const rest = wordSpan.createSpan({
+					cls: "velocity-bionic-rest",
+					text: wObj.bionic.rest,
+				});
+
+				pEl.appendText(" ");
+
+				this.cachedBionicWordElements.set(wObj.index, {
+					container: wordSpan,
+					fixation,
+					rest,
+				});
+			}
+		}
+
+		this.bionicContainer.scrollTop = 0;
+	}
+
+	private updateBionicHighlighting(activeIdx: number): void {
+		this.ensureBionicChunkLoaded(activeIdx);
+
+		if (this.activeBionicWordElement) {
+			this.activeBionicWordElement.container.removeClass("is-active-bionic");
+			this.activeBionicWordElement = null;
+		}
+
+		const curr = this.cachedBionicWordElements.get(activeIdx);
+		if (curr) {
+			curr.container.addClass("is-active-bionic");
+			this.activeBionicWordElement = curr;
+			this.scrollWordIntoView(curr.container, this.bionicContainer);
 		}
 	}
 
@@ -536,6 +695,12 @@ export class SpeedReaderModal extends Modal {
 		this.wordTimeElapsed = 0;
 		this.renderCurrentWord();
 		this.updateProgressUi();
+
+		if (this.mode === "context" && this.activeWordElement) {
+			this.scrollWordIntoView(this.activeWordElement.container, this.contextContainer, true);
+		} else if (this.mode === "bionic" && this.activeBionicWordElement) {
+			this.scrollWordIntoView(this.activeBionicWordElement.container, this.bionicContainer, true);
+		}
 	}
 
 	public skipWords(count: number): void {
