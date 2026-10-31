@@ -11,6 +11,11 @@ export interface SaccadicSegments {
 	trailChars: string;
 }
 
+export interface BionicSegments {
+	fixation: string;
+	rest: string;
+}
+
 export interface ParsedWord {
 	/** Global index across the entire loaded document/selection */
 	index: number;
@@ -26,6 +31,8 @@ export interface ParsedWord {
 	orp: OrpSegments;
 	/** Pre-calculated Saccadic Letter Bridging segments for Contextual Flow mode */
 	saccadic: SaccadicSegments;
+	/** Pre-calculated Bionic Reading segments (bold fixation point + remainder) */
+	bionic: BionicSegments;
 	/** Smart Micro-Pause multiplier when micro-pauses are enabled */
 	pauseMultiplier: number;
 	/** Whether this word concludes a sentence (ends with ., !, or ?) */
@@ -90,6 +97,15 @@ export function stripMarkdownFormatting(rawMarkdown: string): string {
 
 	// 7. Strip HTML tags
 	text = text.replace(/<\/?[a-z][^>]*>/gi, "");
+
+	// 7.5. Clean Markdown table divider rows (e.g. |:---|:---| or |---|---|)
+	text = text.replace(/^[ \t]*\|?([ \t]*:?-+:?[ \t]*\|)+[ \t]*:?-+:?[ \t]*\|?[ \t]*$/gm, "");
+
+	// Clean Markdown table borders and pipe delimiters so table cells separate cleanly into readable sentences
+	text = text.replace(/^[ \t]*\|[ \t]*/gm, "");
+	text = text.replace(/[ \t]*\|[ \t]*$/gm, "\n\n");
+	text = text.replace(/[ \t]*\|[ \t]*/g, " — ");
+	text = text.replace(/\|/g, " ");
 
 	// 8. Strip line-level Markdown prefixes (headings #, blockquotes >, list checkboxes, horizontal rules)
 	text = text.replace(/^[ \t]*#{1,6}[ \t]+/gm, "");
@@ -187,6 +203,67 @@ export function splitWordForSaccadic(word: string): SaccadicSegments {
 }
 
 /**
+ * Splits a word into Bionic Reading segments:
+ * - `fixation`: Leading portion of the word bolded/accented to guide eye fixations
+ * - `rest`: Remaining portion of the word
+ */
+export function splitWordForBionic(word: string): BionicSegments {
+	const chars = Array.from(word);
+	const len = chars.length;
+	if (len === 0) {
+		return { fixation: "", rest: "" };
+	}
+
+	// Identify leading/trailing punctuation boundaries for clean bolding
+	let prefixIdx = 0;
+	try {
+		while (prefixIdx < len && /^[^\p{L}\p{N}]$/u.test(chars[prefixIdx])) {
+			prefixIdx++;
+		}
+	} catch (_e) {
+		while (prefixIdx < len && /^[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF]$/.test(chars[prefixIdx])) {
+			prefixIdx++;
+		}
+	}
+
+	let suffixIdx = len - 1;
+	try {
+		while (suffixIdx >= prefixIdx && /^[^\p{L}\p{N}]$/u.test(chars[suffixIdx])) {
+			suffixIdx--;
+		}
+	} catch (_e) {
+		while (suffixIdx >= prefixIdx && /^[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF]$/.test(chars[suffixIdx])) {
+			suffixIdx--;
+		}
+	}
+
+	const letterCount = Math.max(0, suffixIdx - prefixIdx + 1);
+	if (letterCount <= 1) {
+		return {
+			fixation: chars.slice(0, Math.min(len, prefixIdx + 1)).join(""),
+			rest: chars.slice(Math.min(len, prefixIdx + 1)).join(""),
+		};
+	}
+
+	let fixLetters = 1;
+	if (letterCount === 2) {
+		fixLetters = 1;
+	} else if (letterCount === 3) {
+		fixLetters = 2;
+	} else if (letterCount <= 6) {
+		fixLetters = Math.ceil(letterCount * 0.5);
+	} else {
+		fixLetters = Math.ceil(letterCount * 0.45);
+	}
+
+	const splitPoint = prefixIdx + fixLetters;
+	return {
+		fixation: chars.slice(0, splitPoint).join(""),
+		rest: chars.slice(splitPoint).join(""),
+	};
+}
+
+/**
  * Calculates the smart micro-pause duration multiplier for a word:
  * - Words ending with `,`, `;`, `:` -> 1.3x duration
  * - Words ending with `.`, `!`, `?` -> 1.6x duration
@@ -277,6 +354,7 @@ export function processText(rawMarkdown: string): ProcessedDocument {
 			const token = rawTokens[wIdx];
 			const orp = splitWordForOrp(token);
 			const saccadic = splitWordForSaccadic(token);
+			const bionic = splitWordForBionic(token);
 			const { pauseMultiplier, isSentenceEnd, cleanLength } = calculatePauseMetadata(token);
 
 			const parsedWord: ParsedWord = {
@@ -287,6 +365,7 @@ export function processText(rawMarkdown: string): ProcessedDocument {
 				cleanLength,
 				orp,
 				saccadic,
+				bionic,
 				pauseMultiplier,
 				isSentenceEnd,
 			};

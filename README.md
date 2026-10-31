@@ -6,17 +6,21 @@
 
 ## Features
 
-### 1. Two Reading Modes
+### 1. Three Reading Modes
 - **RSVP / Prime Reader Mode (Word-by-Word):**
   - Displays one word at a time in a distraction-free viewport.
   - Implements **Optimal Recognition Point (ORP)** alignment (Spritz style): calculates the focal letter index (roughly 30–35% into the word) and anchors it precisely to a horizontal reticle. Your eyes never have to saccade horizontally across the word.
   - The focal letter is prominently highlighted in a customizable accent color.
 - **Contextual Flow Mode (Multi-Paragraph with Saccadic Letter Bridging):**
   - Displays a clean window of 1 to 3 paragraphs at a time.
-  - Dims non-active text (`opacity: 0.45`) to minimize peripheral clutter.
+  - Dims non-active text (`opacity: 0.5`) to minimize peripheral clutter.
   - The active word $N$ is highlighted at full brightness with a soft pill background.
   - **Saccadic Edge Highlighting:** Softly highlights trailing characters of word $N-1$ and pre-highlights leading characters of upcoming word $N+1$ to naturally pull peripheral vision forward.
-  - Zero layout shifts or vertical scrolling jitter.
+  - Automatically and smoothly scrolls long paragraphs with zero jitter.
+- **Bionic Reading Mode (Fixation-Guided Flow):**
+  - Formats every word with bold initial fixation letters, guiding the eye through text and allowing the brain to complete words more rapidly.
+  - Active word pacing moves at the selected WPM with an accented outline pill.
+  - Smooth auto-scrolling keeps the reading focal area perfectly centered.
 
 ### 2. High-Precision Timing Engine (50 – 3000 WPM)
 - Built with `requestAnimationFrame` tracking elapsed high-resolution timestamps via `performance.now()` with sub-frame compensation to prevent drift even at 3000 WPM (20 ms per word).
@@ -39,7 +43,7 @@
 | Key | Action |
 | :--- | :--- |
 | **`Space`** | Play / Pause playback |
-| **`Tab`** / **`M`** | Switch mode (RSVP ↔ Context Flow) |
+| **`Tab`** / **`M`** | Switch mode (RSVP ↔ Context Flow ↔ Bionic) |
 | **`ArrowUp`** | Increase speed (+25 WPM) |
 | **`ArrowDown`** | Decrease speed (-25 WPM) |
 | **`ArrowLeft`** | Skip backward 10 words or to previous sentence |
@@ -67,11 +71,11 @@ npm run build
 
 ## Settings
 - **Default Reading Speed:** Set default WPM (50 – 3000 WPM).
-- **Default Reading Mode:** Choose RSVP or Contextual Flow as your initial view.
+- **Default Reading Mode:** Choose RSVP, Contextual Flow, or Bionic Reading as your initial view.
 - **Smart Micro-Pauses:** Toggle micro-pauses for punctuation and long words.
 - **ORP Focal Letter Accent Color:** Customize the reticle focal letter color.
-- **Font Sizes:** Individually configure RSVP and Contextual Flow font sizes.
-- **Paragraphs per Page:** Display 1, 2, or 3 paragraphs at a time in Context Flow mode.
+- **Font Sizes:** Individually configure RSVP, Contextual Flow, and Bionic Reading font sizes.
+- **Paragraphs per Page:** Display 1, 2, or 3 paragraphs at a time in Context Flow and Bionic modes.
 
 ---
 

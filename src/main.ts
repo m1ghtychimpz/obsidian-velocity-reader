@@ -17,6 +17,7 @@ export interface VelocityReaderSettings {
 	defaultMode: ReadingMode;
 	rsvpFontSize: number;
 	contextFontSize: number;
+	bionicFontSize: number;
 	orpAccentColor: string;
 	smartMicroPauses: boolean;
 	paragraphsPerPage: number;
@@ -27,6 +28,7 @@ export const DEFAULT_SETTINGS: VelocityReaderSettings = {
 	defaultMode: "rsvp",
 	rsvpFontSize: 48,
 	contextFontSize: 22,
+	bionicFontSize: 22,
 	orpAccentColor: "#e06c75",
 	smartMicroPauses: true,
 	paragraphsPerPage: 2,
@@ -282,6 +284,7 @@ class VelocityReaderSettingTab extends PluginSettingTab {
 				dropdown
 					.addOption("rsvp", "RSVP / Prime Reader (Single Word)")
 					.addOption("context", "Contextual Flow (Multi-Paragraph)")
+					.addOption("bionic", "Bionic Reading (Fixation Guided Flow)")
 					.setValue(this.plugin.settings.defaultMode)
 					.onChange(async (val) => {
 						this.plugin.settings.defaultMode = val as ReadingMode;
@@ -344,6 +347,21 @@ class VelocityReaderSettingTab extends PluginSettingTab {
 					.setDynamicTooltip()
 					.onChange(async (val) => {
 						this.plugin.settings.contextFontSize = val;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// Bionic Reading Font Size
+		new Setting(containerEl)
+			.setName("Bionic Reading Font Size (px)")
+			.setDesc("Font size for the Bionic Reading viewer (14px to 36px).")
+			.addSlider((slider) =>
+				slider
+					.setLimits(14, 36, 1)
+					.setValue(this.plugin.settings.bionicFontSize ?? 22)
+					.setDynamicTooltip()
+					.onChange(async (val) => {
+						this.plugin.settings.bionicFontSize = val;
 						await this.plugin.saveSettings();
 					})
 			);
